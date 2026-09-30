@@ -83,7 +83,15 @@ async function main() {
     mergedGroups += 1;
   }
 
-  console.log(`\n${mergedGroups} duplicate group(s) merged, ${mergedRows} Team row(s) removed`);
+  // A row with no aliases and no providerId can't be reached by any lookup —
+  // typically a club whose spellings apply-aliases.ts has since moved onto
+  // the synced row ("Coventry" -> "Coventry City FC"). Nothing else
+  // references Team, so it's dead weight.
+  const orphans = await prisma.team.findMany({ where: { providerId: null, aliases: { none: {} } } });
+  for (const o of orphans) await prisma.team.delete({ where: { id: o.id } });
+  if (orphans.length) console.log(`removed unreachable row(s): ${orphans.map((o) => `"${o.name}"`).join(", ")}`);
+
+  console.log(`\n${mergedGroups} duplicate group(s) merged, ${mergedRows + orphans.length} Team row(s) removed`);
 }
 
 main().then(() => prisma.$disconnect());

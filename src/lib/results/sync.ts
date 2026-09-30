@@ -45,6 +45,22 @@ async function resolveExistingTeam(t: FetchedTeam): Promise<{ id: string } | nul
   return null;
 }
 
+/**
+ * Every row this club is already known under by full name or short name. TLAs
+ * are left out: they collide across leagues (Millwall and AC Milan are both
+ * "MIL"), so a TLA match isn't evidence two rows are the same club.
+ */
+async function rowsKnownByName(t: FetchedTeam) {
+  const rows = new Map<string, { id: string; providerId: number | null }>();
+  for (const variant of [t.name, t.shortName]) {
+    const alias = variant ? normalise(variant) : "";
+    if (!alias) continue;
+    const existing = await prisma.teamAlias.findUnique({ where: { alias }, include: { team: true } });
+    if (existing) rows.set(existing.team.id, { id: existing.team.id, providerId: existing.team.providerId });
+  }
+  return [...rows.values()];
+}
+
 /** TeamAlias is the only thing that references a Team row, so re-point it and drop the duplicate. */
 async function mergeTeamInto(fromId: string, intoId: string): Promise<void> {
   await prisma.teamAlias.updateMany({ where: { teamId: fromId }, data: { teamId: intoId } });
@@ -73,11 +89,23 @@ async function upsertTeam(t: FetchedTeam, competitionId: string) {
   const known = await resolveExistingTeam(t);
   const holder = await prisma.team.findUnique({ where: { providerId: t.providerId } });
   if (known) {
-    // A sync from before alias resolution may already have forked this club
-    // into a second row holding the providerId; setting it on `known` would
-    // then hit the providerId unique constraint and fail the whole
-    // competition. Fold the fork into `known` instead.
-    if (holder && holder.id !== known.id) await mergeTeamInto(holder.id, known.id);
+    // Syncs from before alias resolution forked clubs into a second row: e.g.
+    // "Coventry City FC" (full name) alongside a seeded "Coventry" (the API's
+    // short name), each holding some of the club's spellings, so picks and
+    // the table resolved to different rows. Fold every such row into `known`.
+    // The providerId holder is the same club by definition — and left in
+    // place, setting the providerId on `known` would hit the unique
+    // constraint and fail the whole competition. A name-matched row already
+    // carrying a different providerId is a different club, so it's left alone.
+    const forks = new Set<string>();
+    if (holder && holder.id !== known.id) forks.add(holder.id);
+    for (const row of await rowsKnownByName(t)) {
+      if (row.id !== known.id && (row.providerId === null || row.providerId === t.providerId)) forks.add(row.id);
+    }
+    for (const id of forks) {
+      await mergeTeamInto(id, known.id);
+      console.log(`merged a duplicate team row into "${t.name}"`);
+    }
     return prisma.team.update({ where: { id: known.id }, data: update });
   }
   // The API renamed a club we already hold under its providerId.

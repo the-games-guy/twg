@@ -79,6 +79,10 @@ export const SEED_ALIASES: { alias: string; canonical: string }[] = [
   { alias: "Burnely", canonical: "Burnley" },
   { alias: "Hull", canonical: "Hull City" },
   { alias: "Feyornoord", canonical: "Feyenoord" },
+  { alias: "Coventry", canonical: "Coventry City" },
+  { alias: "Preston", canonical: "Preston North End" },
+  { alias: "Derby", canonical: "Derby County" },
+  { alias: "Como", canonical: "Como 1907" },
 
   // football-data.org's Champions League names that don't normalise onto ours
   { alias: "FC Bayern München", canonical: "Bayern Munich" },
