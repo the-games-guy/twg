@@ -1,5 +1,6 @@
 /**
- * For every TEAM-valued prediction in the three backfilled seasons, check
+ * For every TEAM-valued prediction in the three backfilled seasons (or the
+ * season labels given as arguments, e.g. `2026/27`), check
  * whether it resolves to a club that actually appears somewhere in that
  * competition's stored results (table, cup stage). A name that resolves to
  * nothing silently scores 0/MISS regardless of what really happened — which a
@@ -13,7 +14,7 @@ import type { CupStagePayload, StandingsPayload } from "@/lib/scoring/types";
 async function main() {
   const aliases = await loadAliasIndex();
   const seasons = await prisma.season.findMany({
-    where: { label: { in: ["2022/23", "2023/24", "2024/25"] } },
+    where: { label: { in: process.argv.length > 2 ? process.argv.slice(2) : ["2022/23", "2023/24", "2024/25"] } },
     include: {
       competitions: {
         include: {

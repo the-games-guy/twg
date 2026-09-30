@@ -69,6 +69,20 @@ export const SEED_ALIASES: { alias: string; canonical: string }[] = [
   // alias already covering the other typo
   { alias: "Atletico Bilbao", canonical: "Athletic Bilbao" },
 
+  // Misspellings and shorthand found in picks across all seasons
+  { alias: "Ateltico Madrid", canonical: "Atletico Madrid" },
+  { alias: "Athletico Madrid", canonical: "Atletico Madrid" },
+  { alias: "Real Mardid", canonical: "Real Madrid" },
+  { alias: "RM", canonical: "Real Madrid" },
+  { alias: "Seville", canonical: "Sevilla" },
+  { alias: "Brenford", canonical: "Brentford" },
+  { alias: "Burnely", canonical: "Burnley" },
+  { alias: "Hull", canonical: "Hull City" },
+  { alias: "Feyornoord", canonical: "Feyenoord" },
+
+  // football-data.org's Champions League names that don't normalise onto ours
+  { alias: "FC Bayern München", canonical: "Bayern Munich" },
+
   // Europe
   { alias: "Paris Saint-Germain", canonical: "PSG" },
   { alias: "Paris SG", canonical: "PSG" },

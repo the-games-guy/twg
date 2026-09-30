@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { prisma, applyPragmas } from "@/lib/db";
 import { COMPETITIONS, EUROPEAN_CUP_KEYS } from "@/lib/competitions";
 import { SEED_ALIASES } from "@/lib/aliases";
-import { normalise } from "@/lib/teams";
+import { applySeedAliases } from "@/lib/teamIndex";
 import { mapRow, newMapperState } from "@/lib/import/slotMapping";
 import {
   CHAMPIONSHIP_OVERRIDES,
@@ -68,20 +68,7 @@ async function main() {
   }
   console.log(`competitions: ${COMPETITIONS.length}`);
 
-  for (const { alias, canonical } of SEED_ALIASES) {
-    const team = await prisma.team.upsert({
-      where: { name: canonical },
-      update: {},
-      create: { name: canonical },
-    });
-    // Store the normalised form so rows match how the lookup index is keyed
-    // ("Paris Saint-Germain" -> "paris saint germain", not "paris saint-germain").
-    await prisma.teamAlias.upsert({
-      where: { alias: normalise(alias) },
-      update: { teamId: team.id },
-      create: { alias: normalise(alias), teamId: team.id },
-    });
-  }
+  await applySeedAliases();
   console.log(`team aliases: ${SEED_ALIASES.length}`);
 
   // The change window: January of the season's second calendar year.
