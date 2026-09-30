@@ -45,6 +45,12 @@ async function resolveExistingTeam(t: FetchedTeam): Promise<{ id: string } | nul
   return null;
 }
 
+/** TeamAlias is the only thing that references a Team row, so re-point it and drop the duplicate. */
+async function mergeTeamInto(fromId: string, intoId: string): Promise<void> {
+  await prisma.teamAlias.updateMany({ where: { teamId: fromId }, data: { teamId: intoId } });
+  await prisma.team.delete({ where: { id: fromId } });
+}
+
 /**
  * Keep canonical club names and their spelling variants in step with the API.
  *
@@ -65,8 +71,18 @@ async function upsertTeam(t: FetchedTeam, competitionId: string) {
   // a name string the API spells differently from the seed/import data
   // reuses the existing row instead of forking a duplicate.
   const known = await resolveExistingTeam(t);
+  const holder = await prisma.team.findUnique({ where: { providerId: t.providerId } });
   if (known) {
+    // A sync from before alias resolution may already have forked this club
+    // into a second row holding the providerId; setting it on `known` would
+    // then hit the providerId unique constraint and fail the whole
+    // competition. Fold the fork into `known` instead.
+    if (holder && holder.id !== known.id) await mergeTeamInto(holder.id, known.id);
     return prisma.team.update({ where: { id: known.id }, data: update });
+  }
+  // The API renamed a club we already hold under its providerId.
+  if (holder) {
+    return prisma.team.update({ where: { id: holder.id }, data: update });
   }
 
   const where = { name: t.name };
