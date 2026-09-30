@@ -1,0 +1,41 @@
+{
+  "name": "twg-comp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx src/worker/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "seed": "tsx scripts/seed.ts",
+    "import:workbook": "tsx scripts/import-workbook.ts",
+    "bot": "tsx scripts/bot-console.ts",
+    "sync": "tsx scripts/sync-now.ts",
+    "dump": "python3 scripts/dump-workbook.py"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "google-auth-library": "^10.9.1",
+    "next": "^16.3.1",
+    "node-cron": "^4.6.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

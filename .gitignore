@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+# Real players' historical picks — kept per-host like the database, never public.
+scripts/workbook.json
+*.tsbuildinfo
+next-env.d.ts

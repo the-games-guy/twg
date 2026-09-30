@@ -1,0 +1,291 @@
+// TWG Comp — schema.
+//
+// Design note: nothing about a specific competition is encoded here. A season
+// is a bag of SeasonCompetitions, each of which owns a set of Slots (the things
+// you predict). Adding La Liga, dropping Germany, or introducing a new cup is
+// data entry, not a migration. See src/lib/scoring/rules.ts for how Slot.kind
+// maps onto scoring behaviour.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id          String  @id @default(cuid())
+  handle      String  @unique // "KV", "MC", "Tok" — matches the spreadsheet columns
+  displayName String
+  isAdmin     Boolean @default(false)
+
+  // Signal identity, populated when the player first messages the bot.
+  // Signal itself is deferred past v1, but nothing here depends on it.
+  signalUuid   String? @unique
+  signalNumber String?
+
+  /// The identity for this player, set by the admin before their first
+  /// sign-in — this IS the registration step, there is no self-serve signup.
+  /// Stored and compared lowercased. Proving control of it is what signs
+  /// someone in, via either method below:
+  email String? @unique
+
+  /// Set only if the admin has issued a password for this player. Null means
+  /// password sign-in is unavailable for them — Google is their only route in.
+  passwordHash String?
+
+  /// Basic brute-force protection on password sign-in. Google sign-in has no
+  /// equivalent need — Google carries its own abuse protection.
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+
+  createdAt DateTime @default(now())
+
+  predictions Prediction[]
+  changes     PredictionChange[]
+  honours     Honour[]
+  sessions    Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([playerId])
+}
+
+/// Versioned scoring configuration. A season points at exactly one ruleset and
+/// keeps pointing at it forever, so re-scoring 2018/19 never picks up 2026/27
+/// rules. New scoring == new row, never an edit to an existing one.
+model Ruleset {
+  id     String  @id @default(cuid())
+  key    String  @unique // "league-v1"
+  name   String
+  /// JSON: see RulesetConfig in src/lib/scoring/types.ts
+  config String
+  notes  String?
+
+  seasons Season[]
+}
+
+model Season {
+  id        String @id @default(cuid())
+  label     String @unique // "2026/27"
+  startYear Int
+  kind      String @default("LEAGUE") // LEAGUE | TOURNAMENT
+
+  /// Predictions are hidden from other players, and immutable, once this passes.
+  predictionDeadline DateTime?
+
+  /// Mid-season change window. Defaults to January of the second calendar year.
+  changeWindowStart DateTime?
+  changeWindowEnd   DateTime?
+  changeBudget      Int       @default(3)
+
+  isActive   Boolean @default(false)
+  /// Historical seasons imported from the workbook: predictions exist but were
+  /// scored by hand, so engine output is advisory only.
+  isImported Boolean @default(false)
+
+  rulesetId String
+  ruleset   Ruleset @relation(fields: [rulesetId], references: [id])
+
+  competitions SeasonCompetition[]
+  changes      PredictionChange[]
+  honours      Honour[]
+}
+
+model Competition {
+  id      String  @id @default(cuid())
+  key     String  @unique // "premier-league"
+  name    String
+  country String?
+  kind    String // LEAGUE | CUP
+
+  /// football-data.org competition code (PL, ELC, PD, SA, CL). Null means the
+  /// results for this competition are entered by hand in the admin screen.
+  providerCode String?
+
+  /// API-Football league id. Free-plan seasons are 2022-2024 only, so this
+  /// backfills historical results rather than running the live season.
+  apiFootballId Int?
+
+  seasons SeasonCompetition[]
+  teams   Team[]
+}
+
+/// A competition's participation in one season. Holds per-season rule overrides
+/// so e.g. the Championship can use a top-6 near-miss band while the Premier
+/// League uses top-4, without either being special-cased in code.
+model SeasonCompetition {
+  id            String @id @default(cuid())
+  seasonId      String
+  competitionId String
+  displayOrder  Int    @default(0)
+
+  /// JSON partial of RulesetConfig, merged over the season's ruleset.
+  ruleOverrides String?
+
+  season      Season      @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  competition Competition @relation(fields: [competitionId], references: [id])
+
+  slots   Slot[]
+  results ActualResult[]
+
+  @@unique([seasonId, competitionId])
+}
+
+/// One thing a player must predict.
+model Slot {
+  id                  String @id @default(cuid())
+  seasonCompetitionId String
+
+  /// LEAGUE_POSITION | RELEGATION | PROMOTION | CUP_WINNER | CUP_SEMI_FINALIST
+  /// | GOLDEN_BOOT_PLAYER | GOLDEN_BOOT_COUNT
+  kind String
+
+  /// For LEAGUE_POSITION this is the finishing position (1..4). For repeated
+  /// slots (3 relegation picks, 4 semi-finalists) it just disambiguates them.
+  ordinal Int @default(1)
+
+  label        String
+  displayOrder Int    @default(0)
+
+  /// TEAM | PLAYER | NUMBER — drives the input control and how value is resolved.
+  valueType String @default("TEAM")
+
+  seasonCompetition SeasonCompetition @relation(fields: [seasonCompetitionId], references: [id], onDelete: Cascade)
+  predictions       Prediction[]
+
+  @@unique([seasonCompetitionId, kind, ordinal])
+  @@index([seasonCompetitionId])
+}
+
+/// Append-only. Editing a prediction supersedes the old row rather than
+/// overwriting it, so the January change window has an auditable history and
+/// "what did MC originally say?" is answerable.
+model Prediction {
+  id       String @id @default(cuid())
+  playerId String
+  slotId   String
+
+  /// Canonical team name, player name, or a number as a string. Resolved
+  /// through TeamAlias at scoring time so "Man City" and "Manchester City FC"
+  /// are the same club.
+  value String
+
+  createdAt    DateTime  @default(now())
+  supersededAt DateTime?
+  changeId     String?
+
+  player Player            @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  slot   Slot              @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  change PredictionChange? @relation(fields: [changeId], references: [id])
+
+  @@index([playerId, slotId])
+  @@index([slotId, supersededAt])
+}
+
+/// One entry per exercised mid-season change. A swap of two of the player's own
+/// picks touches two slots but is deliberately one row, per the sheet's rule:
+/// "If you are swapping 1 team with another in your list ... this is treated as
+/// 1 change."
+model PredictionChange {
+  id       String @id @default(cuid())
+  seasonId String
+  playerId String
+
+  kind        String // EDIT | SWAP
+  description String
+  createdAt   DateTime @default(now())
+
+  season      Season       @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  player      Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  predictions Prediction[]
+
+  @@index([seasonId, playerId])
+}
+
+/// What actually happened. One row per (competition, kind); updated in place as
+/// the season progresses, flipping from PROVISIONAL to FINAL at season end.
+model ActualResult {
+  id                  String @id @default(cuid())
+  seasonCompetitionId String
+
+  kind String // STANDINGS | CUP_STAGE | GOLDEN_BOOT
+
+  /// JSON: see ActualPayload in src/lib/scoring/types.ts
+  payload String
+
+  status String // PROVISIONAL | FINAL
+  source String // football-data | manual | import
+
+  fetchedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seasonCompetition SeasonCompetition @relation(fields: [seasonCompetitionId], references: [id], onDelete: Cascade)
+
+  @@unique([seasonCompetitionId, kind])
+}
+
+/// Canonical club identities. Predictions store the canonical name; aliases
+/// absorb the spelling drift in the workbook ("Atletic Bilbao", "Juve",
+/// "Portgual") and the longer names the API returns.
+model Team {
+  id            String  @id @default(cuid())
+  name          String  @unique
+  shortName     String?
+  providerId    Int?    @unique
+  competitionId String?
+
+  competition Competition? @relation(fields: [competitionId], references: [id])
+  aliases     TeamAlias[]
+}
+
+model TeamAlias {
+  id     String @id @default(cuid())
+  /// Lowercased, punctuation-stripped. See normaliseName() in src/lib/teams.ts
+  alias  String @unique
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+}
+
+/// The honour board. Covers 2012/13 onward, including the early years where no
+/// per-pick detail survives — those import as a winner and nothing else.
+model Honour {
+  id    String @id @default(cuid())
+  label String @unique // "2025/26", "2026 WC"
+  kind  String // SEASON | TOURNAMENT
+  year  Int
+
+  winnerName String
+  winnerId   String?
+  seasonId   String?
+
+  winner Player? @relation(fields: [winnerId], references: [id])
+  season Season? @relation(fields: [seasonId], references: [id])
+
+  @@index([kind, year])
+}
+
+/// Point-in-time totals, used by the weekly digest to report movement rather
+/// than reposting an unchanged table. Deliberately its own model: an earlier
+/// draft reused PredictionChange, which silently consumed players' January
+/// change budget.
+model Snapshot {
+  id        String   @id @default(cuid())
+  seasonId  String
+  key       String
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([seasonId, key, createdAt])
+}

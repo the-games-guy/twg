@@ -1,0 +1,82 @@
+# Self-hosted stack. Three containers, one SQLite file, no external services
+# beyond football-data.org.
+#
+# First run:
+#   cp .env.example .env      # fill in the values
+#   docker compose run --rm app npx prisma db push
+#   docker compose run --rm app npm run seed
+#   docker compose up -d
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: file:/data/twg.db
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY}
+      API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Australia/Sydney}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Scheduled results syncs, the weekly digest, and the Signal listener.
+  # Talks to the same SQLite file as `app` directly — it doesn't need the web
+  # server up, and doesn't need signal-api up either: it checks whether Signal
+  # is configured at runtime rather than failing without it.
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["npm", "run", "worker"]
+    environment:
+      DATABASE_URL: file:/data/twg.db
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY}
+      API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Australia/Sydney}
+      SIGNAL_API_URL: http://signal-api:8080
+      SIGNAL_BOT_NUMBER: ${SIGNAL_BOT_NUMBER}
+      SIGNAL_GROUP_ID: ${SIGNAL_GROUP_ID}
+    volumes:
+      - ./data:/data
+
+  # Cloudflare Tunnel: routes the public domain to the app container over an
+  # outbound-only connection to Cloudflare's edge. No inbound port is opened
+  # on this machine or the router — same "nothing listens publicly" property
+  # the Tailscale setup had, just reachable from the public internet instead
+  # of only the tailnet. Public hostname → service mapping (twgcomp.com →
+  # app:3000) is configured in the Cloudflare Zero Trust dashboard, not here.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+
+  # Signal has no official bot API; this wraps signal-cli. It needs its own
+  # registered phone number — see README. Deferred past v1: behind a profile
+  # so a plain `docker compose up -d` does NOT start it — bring it up
+  # explicitly with `docker compose --profile signal up -d` once it's wanted.
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    profiles: ["signal"]
+    environment:
+      MODE: native
+    ports:
+      # Only needed during registration; can be removed afterwards.
+      - "8080:8080"
+    volumes:
+      - ./data/signal-cli:/home/.local/share/signal-cli
