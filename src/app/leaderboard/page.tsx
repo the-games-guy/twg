@@ -92,7 +92,7 @@ export default async function LeaderboardPage() {
                 <tr>
                   <th>Slot</th>
                   {board.rows.map((row) => (
-                    <th key={row.playerId}>
+                    <th className="player" key={row.playerId}>
                       {row.playerHandle}{row.playerId === player.id ? " (you)" : ""}
                     </th>
                   ))}
@@ -121,7 +121,7 @@ export default async function LeaderboardPage() {
                     <tr key={slotId}>
                       <td>{slotLabel}</td>
                       {cells.map(({ handle, slot }) => (
-                        <td key={handle}>
+                        <td className="player" key={handle}>
                           {slot?.displayPrediction ?? <span className="muted">—</span>}
                           {slot && (
                             <>
